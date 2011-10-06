@@ -22,28 +22,37 @@ using System.Security.Principal;
 
 namespace FileSystemDurabilityPlugin
 {
-    class AzureBlobSync
+    class WindowsAzureBlob2FileSystemSync
     {
-        static string _accountName;
-        static string _accountKey;
-        static string _containerName;
-        static string _localPathName;
-        static string _excludePaths;
-        static string _syncFrequencyInSeconds;
-        static CloudStorageAccount _storageAccount;
+        // Main thread handle
+        static Thread _mainThread = null;
 
         static void Main(string[] args)
         {
+            string accountName = null;
+            string accountKey = null;
+            string containerName = null;
+            string localPathName = null;
+            string excludePaths = null;
+            string fileNameIncludesToSync = null;
+            string excludeSubDirectories = null;
+            string syncFrequencyInSeconds = null;            
+            CloudStorageAccount storageAccount = null;
+            FileSyncScopeFilter filter = null;
+
             try
-            {                
+            {
                 try
                 {
                     if (RoleEnvironment.IsAvailable)
                     {
+                        // Store main thread handle
+                        WindowsAzureBlob2FileSystemSync._mainThread = Thread.CurrentThread;
+                        
                         // Read configuration settings
-                        _accountName = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.StorageAccountName");
-                        _accountKey = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.StorageAccountPrimaryKey");
-                        _containerName = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.SyncContainerName");
+                        accountName = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.StorageAccountName");
+                        accountKey = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.StorageAccountPrimaryKey");
+                        containerName = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.SyncContainerName");
 
                         // FileSystemDurabilityPlugin.LocalFolderToSync must be relative to web site root or approot
 
@@ -74,10 +83,12 @@ namespace FileSystemDurabilityPlugin
                         }
 
                         // Set sync folder on local VM
-                        _localPathName = Path.Combine(appRootDir, RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.LocalFolderToSync"));
-                        
-                        _excludePaths = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.ExcludePathsFromSync");
-                        _syncFrequencyInSeconds = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.SyncFrequencyInSeconds");
+                        localPathName = Path.Combine(appRootDir, RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.LocalFolderToSync"));
+
+                        fileNameIncludesToSync = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.FileNameIncludesToSync");
+                        excludePaths = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.ExcludePathsFromSync");
+                        excludeSubDirectories = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.ExcludeSubDirectories");
+                        syncFrequencyInSeconds = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.SyncFrequencyInSeconds");
                     }
                     else
                     {
@@ -92,7 +103,7 @@ namespace FileSystemDurabilityPlugin
                     Environment.Exit(-1);
                 }
 
-                if (!Directory.Exists(_localPathName))
+                if (!Directory.Exists(localPathName))
                 {
                     Trace.TraceError("Please ensure that the local target directory exists.");
                     Environment.Exit(-1);
@@ -101,40 +112,72 @@ namespace FileSystemDurabilityPlugin
                 //
                 // Setup Store
                 //
-                if (_accountName.Equals("devstoreaccount1"))
+                if (accountName.Equals("devstoreaccount1"))
                 {
-                    _storageAccount = CloudStorageAccount.DevelopmentStorageAccount;
+                    storageAccount = CloudStorageAccount.DevelopmentStorageAccount;
                 }
                 else
                 {
-                    _storageAccount = new CloudStorageAccount(new StorageCredentialsAccountAndKey(_accountName, _accountKey), true);
+                    storageAccount = new CloudStorageAccount(new StorageCredentialsAccountAndKey(accountName, accountKey), true);
                 }
 
                 //
                 // Create container if needed
                 //
-                CloudBlobClient blobClient = _storageAccount.CreateCloudBlobClient();
-                blobClient.GetContainerReference(_containerName).CreateIfNotExist();
+                CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+                blobClient.GetContainerReference(containerName).CreateIfNotExist();
 
-                // Set exclude filter
-                FileSyncScopeFilter filter = null;
-                if (!string.IsNullOrEmpty(_excludePaths))
+                // Whether to include specific files only 
+                if (!string.IsNullOrEmpty(fileNameIncludesToSync))
                 {
-                    filter = new FileSyncScopeFilter();
-                    string[] excludePathInfo = _excludePaths.Split(',');
+                    if (filter == null)
+                    {
+                        filter = new FileSyncScopeFilter();
+                    }
+                    string[] fileNameIncludesToSyncInfo = fileNameIncludesToSync.Split(',');
+                    foreach (string fileIncludes in fileNameIncludesToSyncInfo)
+                    {
+                        filter.FileNameIncludes.Add(fileIncludes);
+                    }
+                }
+
+                // Set exclude path filter                
+                if (!string.IsNullOrEmpty(excludePaths))
+                {
+                    if (filter == null)
+                    {
+                        filter = new FileSyncScopeFilter();
+                    }
+                    string[] excludePathInfo = excludePaths.Split(',');
                     foreach (string excludePath in excludePathInfo)
                     {
                         filter.SubdirectoryExcludes.Add(excludePath);
                     }
                 }
 
-                if (_syncFrequencyInSeconds.Equals("-1"))
+                // Whether to exclude directoraries
+                if (excludeSubDirectories.Equals("true"))
                 {
-                    SynchronizeOnce(filter);
+                    if (filter == null)
+                    {
+                        filter = new FileSyncScopeFilter();
+                    }
+                    filter.AttributeExcludeMask = FileAttributes.Directory;
+                }
+                
+                if (syncFrequencyInSeconds.Equals("-1"))
+                {
+                    SynchronizeOnce(filter, localPathName, containerName, storageAccount);
                 }                
                 else
                 {
-                    int frequencyInSecond = int.Parse(_syncFrequencyInSeconds, System.Globalization.NumberStyles.Integer);
+                    // Need to synchronize periodically
+
+                    // Register event handler for roleinstance stopping  and changed events
+                    RoleEnvironment.Stopping += WindowsAzureBlob2FileSystemSync.RoleEnvironmentStopping;
+                    RoleEnvironment.Changed += WindowsAzureBlob2FileSystemSync.RoleEnvironmentChanged;
+
+                    int frequencyInSecond = int.Parse(syncFrequencyInSeconds, System.Globalization.NumberStyles.Integer);
                     if (frequencyInSecond > 0)
                     {
                         // Start Synchronization periodically
@@ -142,7 +185,7 @@ namespace FileSystemDurabilityPlugin
                         {
                             try
                             {
-                                SynchronizeOnce(filter);
+                                SynchronizeOnce(filter, localPathName, containerName, storageAccount);
                             }
                             catch (Exception ex)
                             {
@@ -150,10 +193,30 @@ namespace FileSystemDurabilityPlugin
                             }
 
                             // Check new value for SyncFrequencyInSeconds, it can be modified
-                            _syncFrequencyInSeconds = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.SyncFrequencyInSeconds");
-                            frequencyInSecond = int.Parse(_syncFrequencyInSeconds, System.Globalization.NumberStyles.Integer);
+                            syncFrequencyInSeconds = RoleEnvironment.GetConfigurationSettingValue("FileSystemDurabilityPlugin.SyncFrequencyInSeconds");
+                            int currentFrequencyInSecond = int.Parse(syncFrequencyInSeconds, System.Globalization.NumberStyles.Integer);
+                            if (frequencyInSecond != currentFrequencyInSecond)
+                            {
+                                Trace.TraceInformation("Changing sync frequency to {0} seconds.", currentFrequencyInSecond);
+                                frequencyInSecond = currentFrequencyInSecond;
+                            }
 
-                            Thread.Sleep(TimeSpan.FromSeconds(frequencyInSecond));
+                            try
+                            {
+                                if (frequencyInSecond > 0)
+                                {
+                                    Thread.Sleep(TimeSpan.FromSeconds(frequencyInSecond));
+                                }
+                                else
+                                {
+                                    // Pause the thread
+                                    Thread.Sleep(Timeout.Infinite);
+                                }
+                            }
+                            catch (ThreadInterruptedException)
+                            {
+                                Trace.TraceInformation("File Synchronization thread interrupted. Configuration settings might have changed.");                                
+                            }
                         }
                     }
                 }
@@ -164,13 +227,34 @@ namespace FileSystemDurabilityPlugin
             }
         }
 
+        // Event handler for roleinstance stopping event
+        private static void RoleEnvironmentStopping(object sender, RoleEnvironmentStoppingEventArgs e)
+        {
+            Trace.TraceError("Roleinstance stopping, hence terminating file synchronization.");
+            Environment.Exit(-1);
+        }
+
+        // Event handler for roleenvironment changed event
+        private static void RoleEnvironmentChanged(object sender, RoleEnvironmentChangedEventArgs e)
+        {
+            if (WindowsAzureBlob2FileSystemSync._mainThread != null)
+            {
+                Trace.TraceInformation("Rolenvironment changed. Interrupting Synchronization thread that might be sleeping");
+                WindowsAzureBlob2FileSystemSync._mainThread.Interrupt();
+            }
+        }
+
         // Main sync happens here
-        private static void SynchronizeOnce(FileSyncScopeFilter filter)
+        private static void SynchronizeOnce(
+            FileSyncScopeFilter filter, 
+            string localPathName, 
+            string containerName, 
+            CloudStorageAccount storageAccount)
         {
             // Setup Provider
-            AzureBlobStore blobStore = new AzureBlobStore(_containerName, _storageAccount);
+            AzureBlobStore blobStore = new AzureBlobStore(containerName, storageAccount);
 
-            AzureBlobSyncProvider azureProvider = new AzureBlobSyncProvider(_containerName, blobStore);
+            AzureBlobSyncProvider azureProvider = new AzureBlobSyncProvider(containerName, blobStore);
             azureProvider.ApplyingChange += new EventHandler<ApplyingBlobEventArgs>(UploadingFile);
 
             FileSyncProvider fileSyncProvider = null;
@@ -178,26 +262,26 @@ namespace FileSystemDurabilityPlugin
             {
                 try
                 {
-                    fileSyncProvider = new FileSyncProvider(_localPathName);
+                    fileSyncProvider = new FileSyncProvider(localPathName);
                 }
                 catch (ArgumentException)
                 {
-                    fileSyncProvider = new FileSyncProvider(Guid.NewGuid(), _localPathName);
+                    fileSyncProvider = new FileSyncProvider(Guid.NewGuid(), localPathName);
                 }
             }
             else
             {
                 try
                 {
-                    fileSyncProvider = new FileSyncProvider(_localPathName, filter, FileSyncOptions.None);
+                    fileSyncProvider = new FileSyncProvider(localPathName, filter, FileSyncOptions.None);
                 }
                 catch (ArgumentException)
                 {
-                    fileSyncProvider = new FileSyncProvider(Guid.NewGuid(), _localPathName, filter, FileSyncOptions.None);
+                    fileSyncProvider = new FileSyncProvider(Guid.NewGuid(), localPathName, filter, FileSyncOptions.None);
                 }
             }
 
-            fileSyncProvider.ApplyingChange += new EventHandler<ApplyingChangeEventArgs>(AzureBlobSync.DownloadingFile);
+            fileSyncProvider.ApplyingChange += new EventHandler<ApplyingChangeEventArgs>(WindowsAzureBlob2FileSystemSync.DownloadingFile);
 
             try
             {

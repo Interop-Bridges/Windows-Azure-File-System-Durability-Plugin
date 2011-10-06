@@ -11,7 +11,9 @@
     <Setting name="StorageAccountPrimaryKey"/>
     <Setting name="SyncContainerName"/>
     <Setting name="LocalFolderToSync"/>
+    <Setting name="FileNameIncludesToSync"/>
     <Setting name="ExcludePathsFromSync"/>
+    <Setting name="ExcludeSubDirectories"/>
     <Setting name="SyncFrequencyInSeconds"/>
   </ConfigurationSettings>
 </RoleModule>
