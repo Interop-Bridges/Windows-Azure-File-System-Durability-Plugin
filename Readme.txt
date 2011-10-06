@@ -4,8 +4,9 @@
 
 FileSystemDurabilityPlugin:
 ===========================
-Windows Azure platform provides infinite scalability if applications are designed using best practices recommended for scalability. Most important requirement is to design stateless application. If application does not store any state on 
-the host it is running on, then it becomes easy to replicate this application on multiple instances and serving more requests. 
+Windows Azure platform provides infinite scalability if applications are designed using best practices recommended for scalability. 
+Most important requirement is to design stateless application. If application does not store any state on the host it is running on, 
+then it becomes easy to replicate this application on multiple instances and serving more requests. 
 
 Instance count in the Windows Azure application’s serviceconfigration.cscfg file can be used to provision multiple instances.
 
@@ -44,8 +45,7 @@ Microsoft Sync Framework team. This is just a Windows Azure plugin wrapper on to
 
 Requirement
 ===========
-You need to use Windows Azure SDK 1.4 Refresh available in the Web Platform Installer. Please make sure that you 
-have installed version number 1.4.20407.2049.
+You need to install Windows Azure SDK 1.5.
 
 How to Install this plugin?
 ===========================
@@ -55,7 +55,7 @@ Option-1) Build from source
   1) ProviderServices-v2.1-x64-ENU.msi
   2) Synchronization-v2.1-x64-ENU.msi
 
-- Build the Visual Studio Solution. It will produce binaries in FileSystemDurabilityPlugin\bin\debug folder as shown bellow,
+- Build the Visual Studio Solution. It will produce binaries in FileSystemDurabilityPlugin\bin\debug folder as shown below,
 
 <SolutionDir>\FileSystemDurabilityPlugin\bin\debug
 │   FileSystemDurabilityPlugin.csplugin
@@ -77,21 +77,20 @@ Option-1) Build from source
         Synchronization-v2.1-x64-ENU.msi
 
 - Create a folder FileSystemDurabilityPlugin in Windows Azure SDK plugin 
-  folder "C:\Program Files\Windows Azure SDK\v1.4\bin\plugins"
+  folder "C:\Program Files\Windows Azure SDK\v1.5\bin\plugins"
 
 - Copy content of <SolutionDir>\FileSystemDurabilityPlugin\bin\debug folder to the folder
-  "C:\Program Files\Windows Azure SDK\v1.4\bin\plugins\FileSystemDurabilityPlugin". You may 
-  need administrative priviledges to update "C:\Program Files\Windows Azure SDK\v1.4\bin\plugins" folder.
+  "C:\Program Files\Windows Azure SDK\v1.5\bin\plugins\FileSystemDurabilityPlugin". You may 
+  need administrative privileges to update "C:\Program Files\Windows Azure SDK\v1.5\bin\plugins" folder.
 
-Option-2) Download prebuilt plugin for Windows Azure SDK 1.4
+Option-2) Download prebuilt plugin for Windows Azure SDK 1.5
 ------------------------------------------------------------
 - Download the prebuilt binary for the plugin from 
-  https://github.com/downloads/Interop-Bridges/Windows-Azure-File-System-Durability-Plugin/FileSystemDurabilityPlugin.zip
+  https://github.com/downloads/Interop-Bridges/Windows-Azure-File-System-Durability-Plugin/FileSystemDurabilityPlugin-v1.1.zip
 
-- Extract FileSystemDurabilityPlugin.zip into "C:\Program Files\Windows Azure SDK\v1.4\bin\plugins" folder. This 
-  will create a folder "C:\Program Files\Windows Azure SDK\v1.4\bin\plugins\FileSystemDurabilityPlugin"
-  You may need administrative priviledges to update "C:\Program Files\Windows Azure SDK\v1.4\bin\plugins" folder.
-
+- Extract FileSystemDurabilityPlugin.zip into "C:\Program Files\Windows Azure SDK\v1.5\bin\plugins" folder. This 
+  will create a folder "C:\Program Files\Windows Azure SDK\v1.5\bin\plugins\FileSystemDurabilityPlugin"
+  You may need administrative privileges to update "C:\Program Files\Windows Azure SDK\v1.5\bin\plugins" folder.
 
 How to use this plugin?
 =======================
@@ -109,16 +108,27 @@ Users need to set following settings in ServiceConfiguration.cscfg file.
 <Setting name="FileSystemDurabilityPlugin.StorageAccountPrimaryKey" value="*****" /> <!-- Windows Azure Storage account key -->
 <Setting name="FileSystemDurabilityPlugin.SyncContainerName" value="*****" /> <!-- Valid container name -->
 <Setting name="FileSystemDurabilityPlugin.LocalFolderToSync" value="*****" /> <!-- Relative path to approot -->
-<Setting name="FileSystemDurabilityPlugin.ExcludePathsFromSync" value="" /> <!-- Optional. To exclude some folders from sync -->
-<Setting name="FileSystemDurabilityPlugin.SyncFrequencyInSeconds" value="7200" /> <!-- Use -1 if you want to sync only once. Keep this value large to minimize Windows Azure Storage Transaction cost -->
+<Setting name="FileSystemDurabilityPlugin.FileNameIncludesToSync" value="" /> <!-- Optional: To sync specific files only -->
+<Setting name="FileSystemDurabilityPlugin.ExcludePathsFromSync" value="" />   <!-- Optional. To exclude some folders from sync -->
+<Setting name="FileSystemDurabilityPlugin.ExcludeSubDirectories" value="false" /> <!-- To exclude sub directories, set this value as true -->
+<Setting name="FileSystemDurabilityPlugin.SyncFrequencyInSeconds" value="7200" /> <!-- Keep this value large to minimize Windows Azure Storage Transaction cost. Use 0 value to pause the sync. -->
 
-Once settigs are defined in ServiceConfiguration.cscfg, you can package and deploy the application to Windows Azure. Please make sure to use 
+Once settings are defined in ServiceConfiguration.cscfg, you can package and deploy the application to Windows Azure. Please make sure to use 
 correct settings otherwise your role instances may crash and keep on recycling.
+
+How to modify sync frequency after the deployment?
+==================================================
+To modify the sync frequency after the deployment, one needs to modify the FileSystemDurabilityPlugin.SyncFrequencyInSeconds for the deployment 
+on the Windows Azure portal.
+
+How to modify the pause the file synchronization?
+=================================================
+To pause the file synchronization process, one needs to set the FileSystemDurabilityPlugin.SyncFrequencyInSeconds value to 0.
 
 ============
 *** NOTE ***
 ============
 As this plugin periodically check for changes in master blob storage container for several blobs, it makes lots of 
 Windows Azure Storage Transactions. Therefore you should NOT set low value for SyncFrequencyInSeconds duration. 
-Typycally this value should be in hours. Please monitor daily usage for your Windows Azure Storage Transactions 
+Typically this value should be in hours. Please monitor daily usage for your Windows Azure Storage Transactions 
 and increase this duration if you think the cost is not justified for your business.
