@@ -121,8 +121,8 @@ How to modify sync frequency after the deployment?
 To modify the sync frequency after the deployment, one needs to modify the FileSystemDurabilityPlugin.SyncFrequencyInSeconds for the deployment 
 on the Windows Azure portal.
 
-How to modify the pause the file synchronization?
-=================================================
+How to pause the file synchronization?
+======================================
 To pause the file synchronization process, one needs to set the FileSystemDurabilityPlugin.SyncFrequencyInSeconds value to 0.
 
 ============
